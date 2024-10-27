@@ -1,3 +1,5 @@
+We have coded logic to find instances of contracts nearing liquidation on-chain, making use of Infura calls on Aave. We used the Health Ratio (Ratio of Collateral Value to Loan value) of 1 to identify contracts with collateral about to be liquidated. In real life market conditions are such that anything below 1 are rare to find.Then we bid for the liquidation. We made use of a flash loan contract to borrow required capital and execute the liquidation and repay the flash loan. 
+We deployed the code. Then we executed a Multi call contract. A dex contract. A flashloan contract. Liqidatable instances were successfully found. We liquidated to profit from the opportunities. We also created a dashboard to visualise the liquidation opportunities. Alonside an execute button was created with a link to the smart contract with wallet connection. 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 First install all of the dependencies using the below command. 
