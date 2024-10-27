@@ -1,101 +1,159 @@
+"use client";
+
+import path from "path";
+import { Metadata } from "next";
 import Image from "next/image";
+import { z } from "zod";
 
-export default function Home() {
+import { columns } from "./tasks/components/columns";
+import { DataTable } from "./tasks/components/data-table";
+import { UserNav } from "./tasks/components/user-nav";
+import { taskSchema } from "./tasks/data/schema";
+import { ethers } from "ethers";
+import { useState, useEffect } from "react";
+
+// Initialize provider - use your own node or service
+const provider = new ethers.providers.JsonRpcProvider(
+  "https://mainnet.infura.io/v3/6ee66c8460e0445b9e01bd338ff90f70"
+);
+
+// Aave V3 Pool contract address on mainnet
+const AAVE_V3_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2";
+const AAVE_DATA_PROVIDER = "0x7B4EB56E7CD4b454BA8ff71E4518426369a138a3";
+
+// Minimal ABI for Aave Pool
+const AAVE_POOL_ABI = [
+  "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)",
+  "function getReservesList() external view returns (address[])",
+  "event LiquidationCall(address indexed collateralAsset, address indexed debtAsset, address indexed user, uint256 debtToCover, uint256 liquidatedCollateralAmount, address liquidator, bool receiveAToken)",
+];
+
+// Initialize contract interfaces
+const aavePool = new ethers.Contract(AAVE_V3_POOL, AAVE_POOL_ABI, provider);
+
+export default function TaskPage() {
+  const [liquidablePositions, setLiquidablePositions] = useState([]);
+
+  useEffect(() => {
+    // Function to scan recent blocks
+    async function scanRecentBlocks() {
+      try {
+        const currentBlock = await provider.getBlockNumber();
+        const fromBlock = currentBlock - 1000000; // Look back 1000 blocks
+
+        // Listen for liquidation events
+        const liquidationFilter = aavePool.filters.LiquidationCall();
+        const liquidationEvents = await aavePool.queryFilter(
+          liquidationFilter,
+          fromBlock,
+          currentBlock
+        );
+
+        console.log(`Found ${liquidationEvents.length} recent liquidations`);
+
+        // Analyze each liquidation
+        for (const event of liquidationEvents) {
+          const user = event.args.user;
+          await checkUserHealth(user);
+        }
+      } catch (error) {
+        console.error("Error scanning blocks:", error);
+      }
+    }
+
+    async function checkUserHealth(userAddress) {
+      try {
+        const accountData = await aavePool.getUserAccountData(userAddress);
+
+        // Convert health factor to readable number (1e18 decimals)
+        const healthFactor = ethers.utils.formatUnits(
+          accountData.healthFactor,
+          18
+        );
+
+        // Positions with health factor below 1.2 are getting risky
+        if (parseFloat(healthFactor) < 1.2) {
+          console.log(`\nRisky Position Found:`);
+          console.log(`User Address: ${userAddress}`);
+          console.log(`Health Factor: ${healthFactor}`);
+          console.log(
+            `Total Collateral (USD): ${ethers.utils.formatUnits(
+              accountData.totalCollateralBase,
+              8
+            )}`
+          );
+          console.log(
+            `Total Debt (USD): ${ethers.utils.formatUnits(
+              accountData.totalDebtBase,
+              8
+            )}`
+          );
+
+          // Calculate liquidation price
+          const liquidationThreshold =
+            accountData.currentLiquidationThreshold.toString() / 10000;
+          console.log(`Liquidation Threshold: ${liquidationThreshold}`);
+
+          // Add to state for rendering in the UI
+
+          let display; // Declare display outside the if/else block
+
+          // Ensure healthFactor is a number
+          const hf = parseFloat(healthFactor);
+
+          if (hf <= 1.0) {
+            display = "Liquidate";
+          } else {
+            display = "Cannot Liquidate";
+          }
+
+          setLiquidablePositions((prev) => [
+            ...prev,
+            {
+              userAddress,
+              healthFactor,
+              totalCollateralBase: ethers.utils.formatUnits(
+                accountData.totalCollateralBase,
+                8
+              ),
+              totalDebtBase: ethers.utils.formatUnits(
+                accountData.totalDebtBase,
+                8
+              ),
+              liquidationThreshold,
+              display: display,
+            },
+          ]);
+          console.log("base");
+          console.log(display);
+          console.log(liquidablePositions);
+        }
+      } catch (error) {
+        console.error(`Error checking health for ${userAddress}:`, error);
+      }
+    }
+
+    scanRecentBlocks();
+  }, []);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <div className="mt-20 mx-16">
+      <div className="hidden h-full flex-1 flex-col space-y-8 p-8 md:flex">
+        <div className="flex items-center justify-between space-y-2">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">
+              Welcome back !
+            </h2>
+            <p className="text-muted-foreground">
+              Any liquidable positions found will be shown below
+            </p>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        <DataTable
+          data={z.array(taskSchema).parse(liquidablePositions)}
+          columns={columns}
+        />
+      </div>
     </div>
   );
 }
